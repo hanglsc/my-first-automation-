@@ -1,0 +1,20 @@
+name: Daily Hello Workflow
+
+on:
+  schedule:
+    - cron: '0 8 * * *'
+  workflow_dispatch:
+
+jobs:
+  hello:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Print Hello Message
+        run: echo "早安！今天是 $(date)"
+      
+      - name: Print Current Time
+        run: echo "現在時間是：$(date '+%Y年%m月%d日 %H:%M:%S')"
+      
+      - name: Simple Math
+        run: echo "2 + 2 = $((2 + 2))"
