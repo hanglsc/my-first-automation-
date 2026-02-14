@@ -1,0 +1,19 @@
+name: 每天早上說早安
+
+on:
+  schedule:
+    - cron: '0 8 * * *'  # 每天早上8點執行
+
+jobs:
+  hello:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: 第一步：打招呼
+        run: echo "早安！今天是 $(date)"
+      
+      - name: 第二步：顯示時間
+        run: echo "現在時間是：$(date '+%Y年%m月%d日 %H:%M:%S')"
+      
+      - name: 第三步：做簡單計算
+        run: echo "2 + 2 = $((2 + 2))"
