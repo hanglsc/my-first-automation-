@@ -1,0 +1,223 @@
+"""
+簡化版本 - 不需要自動下載 ChromeDriver
+需要手動放置 chromedriver.exe 在項目文件夾
+"""
+
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.chrome.options import Options
+import pandas as pd
+import time
+from datetime import datetime
+import os
+import json
+
+print("=" * 70)
+print("香港交易所 - 關鍵詞搜索和 PDF 鏈接提取")
+print("=" * 70)
+
+# ==================== 配置部分 ====================
+START_DATE = "2025/05/01"
+END_DATE = "2025/12/03"
+
+KEYWORDS = [
+    '供股',
+    '配股',
+    '股權集中',
+    '易手',
+    '全購'
+]
+
+OUTPUT_FOLDER = 'hkex_search_results'
+PDF_LINKS_FILE = f'{OUTPUT_FOLDER}/pdf_links.csv'
+SEARCH_LOG_FILE = f'{OUTPUT_FOLDER}/search_log.json'
+
+if not os.path.exists(OUTPUT_FOLDER):
+    os.makedirs(OUTPUT_FOLDER)
+
+print(f"⏰ 搜索時間範圍：{START_DATE} 至 {END_DATE}")
+print(f"🔍 搜索關鍵詞：{', '.join(KEYWORDS)}")
+
+# ==================== 初始化瀏覽器 ====================
+print("\n⏳ 啟動瀏覽器...")
+
+chrome_options = Options()
+# chrome_options.add_argument('--headless')  # 取消註釋可無視窗運行
+
+try:
+    # 直接使用本地的 chromedriver.exe
+    driver = webdriver.Chrome(options=chrome_options)
+    print("✅ 瀏覽器已啟動")
+except FileNotFoundError:
+    print("❌ 找不到 chromedriver.exe")
+    print("💡 請確保 chromedriver.exe 在項目文件夾裡")
+    print("   下載地址：https://googlechromelabs.github.io/chrome-for-testing/")
+    exit()
+except Exception as e:
+    print(f"❌ 瀏覽器啟動失敗：{e}")
+    exit()
+
+# ==================== 訪問網站 ====================
+print("\n⏳ 訪問香港交易所網站...")
+try:
+    driver.get("https://www.hkexnews.hk/index_c.htm")
+    time.sleep(5)
+    print("✅ 網站已加載")
+except Exception as e:
+    print(f"❌ 訪問網站失敗：{e}")
+    driver.quit()
+    exit()
+
+# ==================== 存儲結果 ====================
+all_results = []
+search_summary = {
+    'start_date': START_DATE,
+    'end_date': END_DATE,
+    'keywords': KEYWORDS,
+    'search_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+    'total_results': 0,
+    'keywords_results': {}
+}
+
+# ==================== 搜索每個關鍵詞 ====================
+print(f"\n⏳ 開始搜索 {len(KEYWORDS)} 個關鍵詞...\n")
+
+for keyword_idx, keyword in enumerate(KEYWORDS, 1):
+    print(f"[{keyword_idx}/{len(KEYWORDS)}] 🔍 搜索關鍵詞：《{keyword}》")
+    print("-" * 70)
+    
+    keyword_results = []
+    
+    try:
+        # 第 1 步：輸入關鍵詞
+        try:
+            search_input = WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located((By.NAME, "Title"))
+            )
+            search_input.clear()
+            search_input.send_keys(keyword)
+            print(f"  ✅ 輸入關鍵詞：{keyword}")
+        except Exception as e:
+            print(f"  ⚠️ 找不到搜索框：{e}")
+            continue
+        
+        # 第 2 步：設定日期
+        try:
+            begin_date_input = WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located((By.NAME, "BeginDate"))
+            )
+            begin_date_input.clear()
+            begin_date_input.send_keys(START_DATE)
+            print(f"  ✅ 設定開始日期：{START_DATE}")
+            
+            end_date_input = driver.find_element(By.NAME, "EndDate")
+            end_date_input.clear()
+            end_date_input.send_keys(END_DATE)
+            print(f"  ✅ 設定結束日期：{END_DATE}")
+        except Exception as e:
+            print(f"  ⚠️ 日期設定失敗：{e}")
+        
+        # 第 3 步：點擊搜索
+        try:
+            search_button = WebDriverWait(driver, 10).until(
+                EC.element_to_be_clickable((By.NAME, "btnSearch"))
+            )
+            search_button.click()
+            print(f"  ⏳ 執行搜索...")
+            time.sleep(5)
+        except Exception as e:
+            print(f"  ⚠️ 搜索失敗：{e}")
+            continue
+        
+        # 第 4 步：提取結果
+        try:
+            WebDriverWait(driver, 10).until(
+                EC.presence_of_all_elements_located((By.TAG_NAME, "tr"))
+            )
+            
+            rows = driver.find_elements(By.TAG_NAME, "tr")
+            print(f"  ✅ 找到 {len(rows)} 行結果")
+            
+            row_count = 0
+            for row in rows[1:]:
+                try:
+                    cells = row.find_elements(By.TAG_NAME, "td")
+                    
+                    if len(cells) >= 4:
+                        announcement_title = cells[0].get_text(strip=True)
+                        announcement_date = cells[1].get_text(strip=True) if len(cells) > 1 else ""
+                        company_name = cells[2].get_text(strip=True) if len(cells) > 2 else ""
+                        
+                        try:
+                            pdf_link_elem = cells[-1].find_element(By.TAG_NAME, "a")
+                            pdf_link = pdf_link_elem.get_attribute("href")
+                            pdf_filename = pdf_link.split('/')[-1] if pdf_link else ""
+                        except:
+                            pdf_link = ""
+                            pdf_filename = ""
+                        
+                        if pdf_link:
+                            result = {
+                                '搜索關鍵詞': keyword,
+                                '公告標題': announcement_title,
+                                '公告日期': announcement_date,
+                                '公司名稱': company_name,
+                                'PDF 檔名': pdf_filename,
+                                'PDF 鏈接': pdf_link,
+                                '搜索時間': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                            }
+                            
+                            keyword_results.append(result)
+                            all_results.append(result)
+                            row_count += 1
+                            
+                            if row_count % 5 == 0 or row_count == 1:
+                                print(f"    [{row_count}] ✅ {announcement_title[:40]}...")
+                
+                except:
+                    pass
+            
+            print(f"  📊 從《{keyword}》找到 {len(keyword_results)} 個 PDF 結果")
+            search_summary['keywords_results'][keyword] = len(keyword_results)
+        
+        except Exception as e:
+            print(f"  ❌ 提取結果失敗：{e}")
+    
+    except Exception as e:
+        print(f"  ❌ 搜索失敗：{e}")
+    
+    print()
+
+# ==================== 關閉瀏覽器 ====================
+print("\n⏳ 關閉瀏覽器...")
+driver.quit()
+print("✅ 瀏覽器已關閉")
+
+# ==================== 保存結果 ====================
+print(f"\n⏳ 保存搜索結果...\n")
+
+if all_results:
+    df = pd.DataFrame(all_results)
+    df.to_csv(PDF_LINKS_FILE, index=False, encoding='utf-8-sig')
+    print(f"✅ PDF 鏈接列表已保存：{PDF_LINKS_FILE}")
+    
+    search_summary['total_results'] = len(all_results)
+    with open(SEARCH_LOG_FILE, 'w', encoding='utf-8') as f:
+        json.dump(search_summary, f, ensure_ascii=False, indent=2)
+    print(f"✅ 搜索日誌已保存：{SEARCH_LOG_FILE}")
+    
+    print("\n" + "=" * 70)
+    print("📋 搜索結果摘要")
+    print("=" * 70)
+    print(f"找到的 PDF 總數：{len(all_results)} 個")
+    print(f"\n各關鍵詞結果數量：")
+    for kw, count in search_summary['keywords_results'].items():
+        print(f"  • {kw}：{count} 個")
+else:
+    print("⚠️ 沒有找到任何結果")
+
+print("=" * 70)
+print("✅ 完成！")
+print("=" * 70)
